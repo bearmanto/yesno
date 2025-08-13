@@ -5,59 +5,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { getClient } from "@/utils/supabase/client";
 import VisibilityToggle from "@/components/VisibilityToggle";
-
-function LikeWidget({ surveyId }: { surveyId: string }) {
-  const supabase = getClient();
-  const [count, setCount] = useState<number>(0);
-  const [liked, setLiked] = useState<boolean>(false);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(async () => {
-    const { data: sess } = await supabase.auth.getSession();
-    const token = sess.session?.access_token;
-    const res = await fetch(`/api/surveys/get?id=${encodeURIComponent(surveyId)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
-    const json = await res.json();
-    if (res.ok) {
-      setCount(json.likeCount ?? 0);
-      setLiked(Boolean(json.likedByMe));
-    }
-  }, [supabase, surveyId]);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  async function toggle() {
-    setBusy(true);
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) { alert("Please sign in to favorite surveys."); return; }
-      const res = await fetch("/api/surveys/toggle-like", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ surveyId }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "toggle failed");
-      setLiked(Boolean(json.liked));
-      setCount(json.likeCount ?? 0);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="row-actions" role="group" aria-label="Favorite survey">
-      <button className="btn" disabled={busy} onClick={toggle} aria-pressed={liked}>
-        {liked ? "★ Favorited" : "☆ Favorite"}
-      </button>
-      <span className="muted">{count} {count === 1 ? "favorite" : "favorites"}</span>
-    </div>
-  );
-}
+import { timeAgo } from "@/utils/time";
+import { useToast } from "@/components/toast/ToastProvider";
 
 type Survey = {
   id: string;
@@ -81,25 +30,28 @@ export default function SurveyPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const supabase = getClient();
+  const { push } = useToast();
+
   const [survey, setSurvey] = useState<Survey | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [isOwner, setIsOwner] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [newQ, setNewQ] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [rename, setRename] = useState("");
-  const [undoQ, setUndoQ] = useState<{ id: string; title: string; deadline: number } | null>(null);
-  const [copied, setCopied] = useState(false);
 
+  // NEW: add-question state
+  const [newQ, setNewQ] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  const [undoQ, setUndoQ] = useState<{ id: string; title: string; deadline: number } | null>(null);
   const mounted = useRef(true);
-  const timer = useRef<number | null>(null);
+  const tickTimer = useRef<number | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (timer.current) window.clearInterval(timer.current);
+      if (tickTimer.current) window.clearInterval(tickTimer.current);
     };
   }, []);
 
@@ -134,18 +86,17 @@ export default function SurveyPage() {
 
   async function vote(questionId: string, answer: "yes" | "no") {
     if (!survey?.id) return;
-    setSubmitting(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) throw new Error("Please sign in to vote.");
+      if (!token) { push("Please sign in to vote.", "error"); return; }
       const res = await fetch("/api/invite/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ surveyId: survey.id, questionId, answer }),
       });
       const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || "vote failed");
+      if (!res.ok) { push(payload.error || "Vote failed", "error"); return; }
       if (payload.question) {
         setQuestions((prev) =>
           prev.map(q => q.id === payload.question.id
@@ -153,10 +104,9 @@ export default function SurveyPage() {
             : q)
         );
       }
+      push("Vote recorded", "success");
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
+      push(e instanceof Error ? e.message : "Vote failed", "error");
     }
   }
 
@@ -165,69 +115,63 @@ export default function SurveyPage() {
     if (!survey?.id) return;
     const title = rename.trim();
     if (!title) return;
-    setSubmitting(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) throw new Error("Please sign in.");
+      if (!token) { push("Please sign in.", "error"); return; }
       const res = await fetch("/api/surveys/rename", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ surveyId: survey.id, title }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "rename failed");
+      if (!res.ok) { push(json.error || "Rename failed", "error"); return; }
       setSurvey((prev) => (prev ? { ...prev, title } : prev));
+      push("Title saved", "success");
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
+      push(e instanceof Error ? e.message : "Rename failed", "error");
     }
   }
 
   async function deleteSurvey() {
     if (!survey?.id) return;
-    if (!confirm("Delete this survey? This cannot be undone.")) return;
-    setSubmitting(true);
+    if (!confirm("Delete this survey?")) return;
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) throw new Error("Please sign in.");
+      if (!token) { push("Please sign in.", "error"); return; }
       const res = await fetch("/api/surveys/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ surveyId: survey.id }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "delete failed");
-      router.replace("/");
+      if (!res.ok) { push(json.error || "Delete failed", "error"); return; }
+      push("Survey deleted", "success");
+      router.replace("/dashboard");
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
+      push(e instanceof Error ? e.message : "Delete failed", "error");
     }
   }
 
   async function deleteQuestion(q: Question) {
-    setSubmitting(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) throw new Error("Please sign in.");
+      if (!token) { push("Please sign in.", "error"); return; }
       const res = await fetch("/api/questions/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ questionId: q.id }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "delete failed");
+      if (!res.ok) { push(json.error || "Delete failed", "error"); return; }
 
       setQuestions(prev => prev.filter(x => x.id !== q.id));
-
       const deadline = Date.now() + 30_000;
       setUndoQ({ id: q.id, title: q.body, deadline });
-      if (timer.current) window.clearInterval(timer.current);
-      timer.current = window.setInterval(() => {
+      if (tickTimer.current) window.clearInterval(tickTimer.current);
+      tickTimer.current = window.setInterval(() => {
         if (!mounted.current) return;
         setUndoQ(curr => {
           if (!curr) return null;
@@ -235,83 +179,94 @@ export default function SurveyPage() {
           return { ...curr };
         });
       }, 500);
+      push("Question deleted", "info");
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
+      push(e instanceof Error ? e.message : "Delete failed", "error");
     }
   }
 
   async function undoDelete() {
     if (!undoQ) return;
-    setSubmitting(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) throw new Error("Please sign in.");
+      if (!token) { push("Please sign in.", "error"); return; }
       const res = await fetch("/api/questions/undo-delete", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ questionId: undoQ.id }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "undo failed");
+      if (!res.ok) { push(json.error || "Undo failed", "error"); return; }
       setUndoQ(null);
-      if (timer.current) { window.clearInterval(timer.current); timer.current = null; }
+      if (tickTimer.current) { window.clearInterval(tickTimer.current); tickTimer.current = null; }
       await fetchData();
+      push("Restored", "success");
     } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
+      push(e instanceof Error ? e.message : "Undo failed", "error");
     }
   }
 
-  const csv = useMemo(() => {
-    if (!survey) return "";
-    const rows: string[][] = [];
-    rows.push(["survey_id", "title", "is_public", "survey_yes", "survey_no", "created_at"]);
-    rows.push([
-      survey.id, survey.title, String(survey.is_public),
-      String(survey.yes_count), String(survey.no_count), survey.created_at,
-    ]);
-    rows.push([]);
-    rows.push(["question_id", "body", "yes_count", "no_count", "created_at"]);
-    for (const q of questions) rows.push([q.id, q.body, String(q.yes_count), String(q.no_count), q.created_at]);
-    return rows.map(r => r.map(cell => {
-      const needsQuote = /[",\n]/.test(cell); const escaped = cell.replace(/"/g, '""');
-      return needsQuote ? `"${escaped}"` : escaped;
-    }).join(",")).join("\n");
-  }, [survey, questions]);
-
-  async function copyLink() {
-    await navigator.clipboard.writeText(location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  // ADD: create a new question
+  async function addQuestion() {
+    if (!survey?.id) return;
+    const body = newQ.trim();
+    if (!body) return;
+    setAdding(true);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) { push("Please sign in.", "error"); return; }
+      const res = await fetch("/api/surveys/add-question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ surveyId: survey.id, body }),
+      });
+      const json = await res.json();
+      if (!res.ok) { push(json.error || "Add question failed", "error"); return; }
+      if (json.question) {
+        setQuestions(prev => [...prev, json.question as Question]);
+        setNewQ("");
+        push("Question added", "success");
+      } else {
+        await fetchData(); // fallback refresh
+        setNewQ("");
+        push("Question added", "success");
+      }
+    } catch (e) {
+      push(e instanceof Error ? e.message : "Add question failed", "error");
+    } finally {
+      setAdding(false);
+    }
   }
 
-  function downloadCSV() {
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `survey_${survey?.id}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  }
+  const totalQuestionVotes = useMemo(
+    () => questions.reduce((acc, q) => acc + (q.yes_count ?? 0) + (q.no_count ?? 0), 0),
+    [questions]
+  );
 
   if (loading) return <main className="container"><p>Loading...</p></main>;
   if (error === "private_or_missing") {
     return (
-      <main className="container">
+      <main className="container" aria-labelledby="private-title">
         <nav className="nav">
           <Link href="/" className="link nav-link">Home</Link>
           <span className="sep">·</span>
           <Link href="/signin" className="link nav-link">Sign in</Link>
         </nav>
-        <h1>Private survey</h1>
-        <p className="muted">This survey is private or you don’t have access. Please sign in using the correct account.</p>
+        <h1 id="private-title">This survey is private</h1>
+        <p className="muted" style={{ marginTop: 8, marginBottom: 16 }}>
+          You don’t have access. Sign in with the correct account, or contact the owner for access.
+        </p>
+        <Link href="/signin" className="btn" aria-label="Go to sign in">Sign in</Link>
       </main>
     );
   }
   if (error) return <main className="container"><p className="error">Error: {error}</p></main>;
   if (!survey) return <main className="container"><p>Not found</p></main>;
+
+  const createdRel = timeAgo(survey.created_at);
+  const createdAbs = new Date(survey.created_at).toLocaleString();
 
   return (
     <main className="container">
@@ -321,39 +276,63 @@ export default function SurveyPage() {
         <Link href="/dashboard" className="link nav-link">Dashboard</Link>
       </nav>
 
-      <h1>{survey.title}</h1>
-      <p className="muted">Public: <b>{String(survey.is_public)}</b></p>
+      <header className="card" role="region" aria-label="Survey header">
+        <h1>{survey.title}</h1>
+        <p className="muted">
+          <span title={createdAbs}>Created {createdRel}</span> · Visibility: <b>{survey.is_public ? "Public" : "Private"}</b> ·
+          {' '}Questions: <b>{questions.length}</b> · Votes: <b>{totalQuestionVotes}</b>
+        </p>
+      </header>
 
       {(isOwner || isAdmin) && (
         <section className="card" aria-labelledby="owner-controls">
           <h3 id="owner-controls">Owner Controls</h3>
           <form onSubmit={onRename} className="row-actions" aria-label="Rename survey">
-            <input className="input" value={rename} onChange={(e) => setRename(e.target.value)} placeholder="Survey title" aria-label="Survey title" />
-            <button className="btn" disabled={submitting || !rename.trim()} type="submit">Save title</button>
-            <button className="btn secondary" type="button" disabled={submitting} onClick={deleteSurvey} aria-label="Delete survey">Delete survey</button>
+            <input
+              className="input"
+              value={rename}
+              onChange={(e) => setRename(e.target.value)}
+              placeholder="Survey title"
+              aria-label="Survey title"
+              inputMode="text"
+            />
+            <button className="btn" type="submit">Save title</button>
+            <button className="btn secondary" type="button" onClick={deleteSurvey} aria-label="Delete survey">Delete survey</button>
           </form>
           <div style={{ height: 10 }} />
           <VisibilityToggle surveyId={survey.id} initial={survey.is_public} />
         </section>
       )}
 
-      <section className="card">
-        <h2>Questions</h2>
-        {questions.length === 0 && <p className="muted">No questions yet.</p>}
-        <ul className="list">
-          {questions.map((q) => (
-            <li key={q.id} className="row">
-              <div>{q.body}</div>
-              <div className="row-actions" role="group" aria-label={`Vote on question: ${q.body}`}>
-                <button className="btn secondary" disabled={submitting} onClick={() => vote(q.id, "yes")} accessKey="y" aria-label="Vote yes">Yes ({q.yes_count})</button>
-                <button className="btn secondary" disabled={submitting} onClick={() => vote(q.id, "no")} accessKey="n" aria-label="Vote no">No ({q.no_count})</button>
-                {(isOwner || isAdmin) && (
-                  <button className="btn secondary" disabled={submitting} onClick={() => deleteQuestion(q)} aria-label="Delete question">Delete</button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+      <section className="card" aria-labelledby="questions">
+        <h2 id="questions">Questions</h2>
+        {questions.length === 0 ? (
+          <div className="row" role="note" aria-live="polite">
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"/>
+                <path d="M12 7v6" stroke="currentColor" />
+                <circle cx="12" cy="17" r="1" fill="currentColor" />
+              </svg>
+              <span className="muted">No questions yet.</span>
+            </span>
+          </div>
+        ) : (
+          <ul className="list" role="listbox" aria-label="Questions list">
+            {questions.map((q) => (
+              <li key={q.id} className="row touch-row" aria-label={`Question: ${q.body}`}>
+                <div>{q.body}</div>
+                <div className="row-actions" role="group" aria-label={`Vote on: ${q.body}`}>
+                  <button className="btn secondary" onClick={() => vote(q.id, "yes")} aria-label="Vote yes">Yes ({q.yes_count})</button>
+                  <button className="btn secondary" onClick={() => vote(q.id, "no")} aria-label="Vote no">No ({q.no_count})</button>
+                  {(isOwner || isAdmin) && (
+                    <button className="btn secondary" onClick={() => deleteQuestion(q)} aria-label="Delete question">Delete</button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {undoQ && (
           <div className="row" role="alert" aria-live="polite" style={{ marginTop: 12 }}>
@@ -368,67 +347,34 @@ export default function SurveyPage() {
         )}
       </section>
 
-      <section className="card">
-        <h3>Favorite</h3>
-        <LikeWidget surveyId={survey.id} />
-      </section>
-
-      <section className="card">
-        <button className="btn" onClick={downloadCSV} aria-label="Export CSV">Export CSV</button>
-        <button
-          className="btn secondary"
-          style={{ marginLeft: 8 }}
-          onClick={copyLink}
-          disabled={copied}
-          aria-live="polite"
-          aria-label={copied ? "Link copied" : "Copy link"}
-        >
-          {copied ? "Copied ✓" : "Copy link"}
-        </button>
-      </section>
-
       {(isOwner || isAdmin) && (
         <section className="card" aria-labelledby="add-question">
           <h3 id="add-question">Add Question</h3>
-          <div className="row-actions">
+          <div className="row-actions" style={{ gap: 8 }}>
             <input
-              className="input"
+              className="input touch"
               value={newQ}
               onChange={(e) => setNewQ(e.target.value)}
-              placeholder="Type your question..."
+              placeholder="Type your yes/no question…"
               aria-label="Question text"
-              onKeyDown={(e) => { if (e.key === "Enter" && newQ.trim()) (document.getElementById("addQBtn") as HTMLButtonElement)?.click(); }}
+              inputMode="text"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newQ.trim() && !adding) {
+                  e.preventDefault();
+                  void addQuestion();
+                }
+              }}
             />
             <button
-              id="addQBtn"
               className="btn"
-              disabled={submitting || !newQ.trim()}
-              onClick={() => {
-                const body = newQ.trim();
-                if (!body || !survey?.id) return;
-                (async () => {
-                  setSubmitting(true);
-                  try {
-                    const { data: sess } = await supabase.auth.getSession();
-                    const token = sess.session?.access_token;
-                    if (!token) throw new Error("Please sign in.");
-                    const res = await fetch("/api/surveys/add-question", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                      body: JSON.stringify({ surveyId: survey.id, body }),
-                    });
-                    const json = await res.json();
-                    if (!res.ok) throw new Error(json.error || "add question failed");
-                    setNewQ("");
-                    if (json.question) setQuestions(prev => [...prev, json.question]);
-                  } catch (e) { alert(e instanceof Error ? e.message : String(e)); }
-                  finally { setSubmitting(false); }
-                })();
-              }}
+              disabled={!newQ.trim() || adding}
+              onClick={() => void addQuestion()}
+              aria-label="Add question"
             >
-              Add
+              {adding ? "Adding…" : "Add"}
             </button>
           </div>
+          <p className="muted" style={{ marginTop: 6 }}>Tip: Keep it short and clear. Examples: “Is dark mode helpful?”, “Ship weekly updates?”</p>
         </section>
       )}
     </main>

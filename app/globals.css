@@ -86,3 +86,25 @@ h1,h2,h3{ margin:8px 0; }
 .input.touch, .btn {
   font-size: 16px; /* avoid iOS zoom on focus */
 }
+
+/* --- Toasts (mobile-first) --- */
+.toast-root {
+  position: fixed;
+  left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+  pointer-events: none;
+  z-index: 60;
+}
+.toast {
+  pointer-events: auto;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 15px;
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+}
+.toast.info { background: #588157; }     /* palette mid green */
+.toast.success { background: #3a5a40; }  /* darker green */
+.toast.error { background: #b00020; }    /* material red-ish */
