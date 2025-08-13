@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { getClient } from "@/utils/supabase/client";
 import VisibilityToggle from "@/components/VisibilityToggle";
+import { timeAgo } from "@/utils/time";
 
 function LikeWidget({ surveyId }: { surveyId: string }) {
   const supabase = getClient();
@@ -92,14 +93,15 @@ export default function SurveyPage() {
   const [rename, setRename] = useState("");
   const [undoQ, setUndoQ] = useState<{ id: string; title: string; deadline: number } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [invite, setInvite] = useState("");
 
   const mounted = useRef(true);
-  const timer = useRef<number | null>(null);
+  const tickTimer = useRef<number | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (timer.current) window.clearInterval(timer.current);
+      if (tickTimer.current) window.clearInterval(tickTimer.current);
     };
   }, []);
 
@@ -226,8 +228,8 @@ export default function SurveyPage() {
 
       const deadline = Date.now() + 30_000;
       setUndoQ({ id: q.id, title: q.body, deadline });
-      if (timer.current) window.clearInterval(timer.current);
-      timer.current = window.setInterval(() => {
+      if (tickTimer.current) window.clearInterval(tickTimer.current);
+      tickTimer.current = window.setInterval(() => {
         if (!mounted.current) return;
         setUndoQ(curr => {
           if (!curr) return null;
@@ -257,7 +259,7 @@ export default function SurveyPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "undo failed");
       setUndoQ(null);
-      if (timer.current) { window.clearInterval(timer.current); timer.current = null; }
+      if (tickTimer.current) { window.clearInterval(tickTimer.current); tickTimer.current = null; }
       await fetchData();
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
@@ -289,29 +291,72 @@ export default function SurveyPage() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  function downloadCSV() {
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `survey_${survey?.id}.csv`; a.click();
-    URL.revokeObjectURL(url);
+  // Keyboard navigation: arrow up/down to move focus between question rows; y/n to vote.
+  const listRef = useRef<HTMLUListElement | null>(null);
+  function focusRow(index: number) {
+    const el = listRef.current?.querySelectorAll<HTMLLIElement>("li[tabindex='0']")?.[index];
+    el?.focus();
+  }
+  function onListKeyDown(e: React.KeyboardEvent<HTMLUListElement>) {
+    const items = Array.from(listRef.current?.querySelectorAll<HTMLLIElement>("li[tabindex='0']") ?? []);
+    if (items.length === 0) return;
+    const idx = items.findIndex((el) => el === document.activeElement);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = Math.min(items.length - 1, (idx < 0 ? 0 : idx + 1));
+      focusRow(next);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prev = Math.max(0, (idx < 0 ? 0 : idx - 1));
+      focusRow(prev);
+    } else if (e.key.toLowerCase() === "y" && idx >= 0) {
+      const q = questions[idx];
+      if (q) void vote(q.id, "yes");
+    } else if (e.key.toLowerCase() === "n" && idx >= 0) {
+      const q = questions[idx];
+      if (q) void vote(q.id, "no");
+    }
   }
 
   if (loading) return <main className="container"><p>Loading...</p></main>;
   if (error === "private_or_missing") {
     return (
-      <main className="container">
+      <main className="container" aria-labelledby="private-title">
         <nav className="nav">
           <Link href="/" className="link nav-link">Home</Link>
           <span className="sep">·</span>
           <Link href="/signin" className="link nav-link">Sign in</Link>
         </nav>
-        <h1>Private survey</h1>
-        <p className="muted">This survey is private or you don’t have access. Please sign in using the correct account.</p>
+        <h1 id="private-title">This survey is private</h1>
+        <p className="muted">You don’t have access. Sign in with the correct account, or enter an invite code below.</p>
+        <section className="card" aria-labelledby="invite-code">
+          <h3 id="invite-code">Have an invite code?</h3>
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              const res = await fetch("/api/invite/check", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code: invite }),
+              });
+              const json = await res.json();
+              alert(json.error || (json.ok ? "Access granted" : "Invalid code"));
+            } catch (err) {
+              alert("Invite codes are not available yet.");
+            }
+          }} className="row-actions" aria-label="Enter invite code">
+            <input className="input" value={invite} onChange={(e) => setInvite(e.target.value)} placeholder="Enter invite code" aria-label="Invite code" />
+            <button className="btn" type="submit" disabled={!invite.trim()}>Submit</button>
+          </form>
+        </section>
       </main>
     );
   }
   if (error) return <main className="container"><p className="error">Error: {error}</p></main>;
   if (!survey) return <main className="container"><p>Not found</p></main>;
+
+  const createdRel = timeAgo(survey.created_at);
+  const createdAbs = new Date(survey.created_at).toLocaleString();
 
   return (
     <main className="container">
@@ -321,8 +366,13 @@ export default function SurveyPage() {
         <Link href="/dashboard" className="link nav-link">Dashboard</Link>
       </nav>
 
-      <h1>{survey.title}</h1>
-      <p className="muted">Public: <b>{String(survey.is_public)}</b></p>
+      <header className="card" role="region" aria-label="Survey header">
+        <h1>{survey.title}</h1>
+        <p className="muted">
+          <span title={createdAbs}>Created {createdRel}</span> ·
+          {' '}Visibility: <b>{survey.is_public ? "Public" : "Private"}</b>
+        </p>
+      </header>
 
       {(isOwner || isAdmin) && (
         <section className="card" aria-labelledby="owner-controls">
@@ -337,23 +387,36 @@ export default function SurveyPage() {
         </section>
       )}
 
-      <section className="card">
-        <h2>Questions</h2>
-        {questions.length === 0 && <p className="muted">No questions yet.</p>}
-        <ul className="list">
-          {questions.map((q) => (
-            <li key={q.id} className="row">
-              <div>{q.body}</div>
-              <div className="row-actions" role="group" aria-label={`Vote on question: ${q.body}`}>
-                <button className="btn secondary" disabled={submitting} onClick={() => vote(q.id, "yes")} accessKey="y" aria-label="Vote yes">Yes ({q.yes_count})</button>
-                <button className="btn secondary" disabled={submitting} onClick={() => vote(q.id, "no")} accessKey="n" aria-label="Vote no">No ({q.no_count})</button>
-                {(isOwner || isAdmin) && (
-                  <button className="btn secondary" disabled={submitting} onClick={() => deleteQuestion(q)} aria-label="Delete question">Delete</button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+      <section className="card" aria-labelledby="questions">
+        <h2 id="questions">Questions</h2>
+        {questions.length === 0 ? (
+          <div className="row" role="note" aria-live="polite">
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {/* Simple inline icon */}
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"/>
+                <path d="M12 7v6" stroke="currentColor" />
+                <circle cx="12" cy="17" r="1" fill="currentColor" />
+              </svg>
+              <span className="muted">No questions yet.</span>
+            </span>
+          </div>
+        ) : (
+          <ul ref={listRef} className="list" onKeyDown={onListKeyDown} role="listbox" aria-label="Questions list (use ↑/↓ to move, Y/N to vote)">
+            {questions.map((q) => (
+              <li key={q.id} className="row" tabIndex={0} aria-label={`Question: ${q.body}`}>
+                <div>{q.body}</div>
+                <div className="row-actions" role="group" aria-label={`Vote on: ${q.body}`}>
+                  <button className="btn secondary" disabled={submitting} onClick={() => vote(q.id, "yes")} accessKey="y" aria-label="Vote yes">Yes ({q.yes_count})</button>
+                  <button className="btn secondary" disabled={submitting} onClick={() => vote(q.id, "no")} accessKey="n" aria-label="Vote no">No ({q.no_count})</button>
+                  {(isOwner || isAdmin) && (
+                    <button className="btn secondary" disabled={submitting} onClick={() => deleteQuestion(q)} aria-label="Delete question">Delete</button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {undoQ && (
           <div className="row" role="alert" aria-live="polite" style={{ marginTop: 12 }}>
@@ -368,23 +431,31 @@ export default function SurveyPage() {
         )}
       </section>
 
-      <section className="card">
-        <h3>Favorite</h3>
+      <section className="card" aria-labelledby="favorite">
+        <h3 id="favorite">Favorite</h3>
         <LikeWidget surveyId={survey.id} />
       </section>
 
-      <section className="card">
-        <button className="btn" onClick={downloadCSV} aria-label="Export CSV">Export CSV</button>
-        <button
-          className="btn secondary"
-          style={{ marginLeft: 8 }}
-          onClick={copyLink}
-          disabled={copied}
-          aria-live="polite"
-          aria-label={copied ? "Link copied" : "Copy link"}
-        >
-          {copied ? "Copied ✓" : "Copy link"}
-        </button>
+      <section className="card" aria-labelledby="export">
+        <h3 id="export">Share & Export</h3>
+        <div className="row-actions">
+          <button className="btn" onClick={() => {
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a"); a.href = url; a.download = `survey_${survey?.id}.csv`; a.click();
+            URL.revokeObjectURL(url);
+          }} aria-label="Export CSV">Export CSV</button>
+          <button
+            className="btn secondary"
+            style={{ marginLeft: 8 }}
+            onClick={async () => { await navigator.clipboard.writeText(location.href); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+            disabled={copied}
+            aria-live="polite"
+            aria-label={copied ? "Link copied" : "Copy link"}
+          >
+            {copied ? "Copied ✓" : "Copy link"}
+          </button>
+        </div>
       </section>
 
       {(isOwner || isAdmin) && (

@@ -46,12 +46,24 @@ export default function SurveysList() {
     return () => { mounted = false; };
   }, [supabase]);
 
+  const Empty = ({ text }: { text: string }) => (
+    <div className="row" role="note" aria-live="polite">
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="14" rx="2" ry="2" fill="none" stroke="currentColor" />
+          <path d="M3 8h18" stroke="currentColor" />
+        </svg>
+        <span className="muted">{text}</span>
+      </span>
+    </div>
+  );
+
   return (
-    <div className="grid2">
+    <div className="grid2" role="region" aria-label="Surveys overview">
       <section className="card" aria-labelledby="mine">
         <h3 id="mine">My Surveys {email ? <span className="muted">({email})</span> : null}</h3>
         {mine.length === 0 ? (
-          <p className="muted">No surveys yet. <Link className="link" href="/">Create one above ↑</Link></p>
+          <Empty text="No surveys yet. Create one above ↑" />
         ) : (
           <ul className="list">
             {mine.map(s => (
@@ -67,7 +79,7 @@ export default function SurveysList() {
       <section className="card" aria-labelledby="public">
         <h3 id="public">Public Surveys</h3>
         {pub.length === 0 ? (
-          <p className="muted">No public surveys yet.</p>
+          <Empty text="No public surveys yet." />
         ) : (
           <ul className="list">
             {pub.map(s => (
