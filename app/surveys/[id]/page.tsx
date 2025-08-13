@@ -1,9 +1,64 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { getClient } from "@/utils/supabase/client";
+import VisibilityToggle from "@/components/VisibilityToggle";
+
+function LikeWidget({ surveyId }: { surveyId: string }) {
+  const supabase = getClient();
+  const [count, setCount] = useState<number>(0);
+  const [liked, setLiked] = useState<boolean>(false);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    const res = await fetch(`/api/surveys/get?id=${encodeURIComponent(surveyId)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    const json = await res.json();
+    if (res.ok) {
+      setCount(json.likeCount ?? 0);
+      setLiked(Boolean(json.likedByMe));
+    }
+  }, [supabase, surveyId]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess.session?.access_token;
+      if (!token) {
+        alert("Please sign in to favorite surveys.");
+        return;
+      }
+      const res = await fetch("/api/surveys/toggle-like", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ surveyId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "toggle failed");
+      setLiked(Boolean(json.liked));
+      setCount(json.likeCount ?? 0);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="row-actions">
+      <button className="btn" disabled={busy} onClick={toggle}>{liked ? "★ Favorited" : "☆ Favorite"}</button>
+      <span className="muted">{count} {count === 1 ? "favorite" : "favorites"}</span>
+    </div>
+  );
+}
 
 type Survey = {
   id: string;
@@ -35,8 +90,7 @@ export default function SurveyPage() {
   const [newQ, setNewQ] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  async function fetchData() {
-    setLoading(true);
+  const fetchData = useCallback(async () => {
     setError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
@@ -55,14 +109,14 @@ export default function SurveyPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [id, supabase]);
 
   useEffect(() => {
+    setLoading(true);
     fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [fetchData]);
 
-  async function vote(questionId: string | null, answer: "yes" | "no") {
+  async function vote(questionId: string, answer: "yes" | "no") {
     if (!survey?.id) return;
     setSubmitting(true);
     try {
@@ -76,54 +130,19 @@ export default function SurveyPage() {
         },
         body: JSON.stringify({
           surveyId: survey.id,
-          questionId: questionId ?? null,
+          questionId,
           answer,
         }),
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || "vote failed");
-
-      // Optimistically update counts from response (then background refresh)
-      if (payload.survey && (questionId === null || questionId === undefined)) {
-        setSurvey((prev) => prev ? { ...prev, yes_count: payload.survey.yes_count, no_count: payload.survey.no_count } : prev);
-      }
-      if (payload.question && questionId) {
+      if (payload.question) {
         setQuestions((prev) =>
           prev.map(q => q.id === payload.question.id
             ? { ...q, yes_count: payload.question.yes_count, no_count: payload.question.no_count }
             : q)
         );
       }
-
-      // Background refresh to stay consistent with RLS state
-      fetchData();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function addQuestion() {
-    const body = newQ.trim();
-    if (!body || !survey?.id) return;
-    setSubmitting(true);
-    try {
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
-      if (!token) throw new Error("Please sign in.");
-      const res = await fetch("/api/surveys/add-question", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ surveyId: survey.id, body }),
-      });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || "add question failed");
-      setNewQ("");
-      await fetchData();
     } catch (e) {
       alert(e instanceof Error ? e.message : String(e));
     } finally {
@@ -172,15 +191,13 @@ export default function SurveyPage() {
   return (
     <main className="container">
       <nav className="nav">
-        <Link href="/" className="link">Home</Link>
+        <Link href="/" className="link nav-link">Home</Link>
         <span className="sep">·</span>
-        <Link href="/dashboard" className="link">Dashboard</Link>
+        <Link href="/dashboard" className="link nav-link">Dashboard</Link>
       </nav>
 
       <h1>{survey.title}</h1>
-      <p className="muted">
-        Survey totals — Yes: <b>{survey.yes_count}</b> · No: <b>{survey.no_count}</b> · Public: <b>{String(survey.is_public)}</b>
-      </p>
+      <p className="muted">Public: <b>{String(survey.is_public)}</b></p>
 
       <section className="card">
         <h2>Questions</h2>
@@ -199,15 +216,8 @@ export default function SurveyPage() {
       </section>
 
       <section className="card">
-        <h3>Vote on whole survey</h3>
-        <div className="row-actions">
-          <button className="btn" disabled={submitting || !survey?.id} onClick={() => vote(null, "yes")}>
-            Vote YES
-          </button>
-          <button className="btn" disabled={submitting || !survey?.id} onClick={() => vote(null, "no")}>
-            Vote NO
-          </button>
-        </div>
+        <h3>Favorite</h3>
+        <LikeWidget surveyId={survey.id} />
       </section>
 
       <section className="card">
@@ -219,15 +229,51 @@ export default function SurveyPage() {
 
       {(isOwner || isAdmin) && (
         <section className="card">
-          <h3>Add Question</h3>
-          <div className="row-actions">
+          <h3>Owner Controls</h3>
+          <VisibilityToggle surveyId={survey.id} initial={survey.is_public} />
+          <div className="row-actions" style={{ marginTop: 12 }}>
             <input
               className="input"
               value={newQ}
               onChange={(e) => setNewQ(e.target.value)}
               placeholder="Type your question..."
             />
-            <button className="btn" disabled={submitting || !newQ.trim()} onClick={addQuestion}>Add</button>
+            <button
+              className="btn"
+              disabled={submitting || !newQ.trim()}
+              onClick={() => {
+                const body = newQ.trim();
+                if (!body || !survey?.id) return;
+                (async () => {
+                  setSubmitting(true);
+                  try {
+                    const { data: sess } = await supabase.auth.getSession();
+                    const token = sess.session?.access_token;
+                    if (!token) throw new Error("Please sign in.");
+                    const res = await fetch("/api/surveys/add-question", {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${token}`,
+                      },
+                      body: JSON.stringify({ surveyId: survey.id, body }),
+                    });
+                    const json = await res.json();
+                    if (!res.ok) throw new Error(json.error || "add question failed");
+                    setNewQ("");
+                    if (json.question) {
+                      setQuestions(prev => [...prev, json.question]);
+                    }
+                  } catch (e) {
+                    alert(e instanceof Error ? e.message : String(e));
+                  } finally {
+                    setSubmitting(false);
+                  }
+                })();
+              }}
+            >
+              Add
+            </button>
           </div>
         </section>
       )}

@@ -38,15 +38,31 @@ export async function GET(req: NextRequest) {
 
   if (qErr) return NextResponse.json({ error: qErr.message }, { status: 500 });
 
+  // like count
+  const { count: likeCount } = await client
+    .from("survey_likes")
+    .select("*", { count: "exact", head: true })
+    .eq("survey_id", id);
+
+  // who am I
   let isOwner = false;
   let isAdmin = false;
+  let likedByMe = false;
+
   if (token) {
     const { data: userRes } = await client.auth.getUser();
     const uid = userRes?.user?.id ?? null;
     if (uid && uid === survey.owner_id) isOwner = true;
     const { data: adminData } = await client.rpc("is_admin", { uid });
     isAdmin = Boolean(adminData);
+
+    const { count } = await client
+      .from("survey_likes")
+      .select("*", { count: "exact", head: true })
+      .eq("survey_id", id)
+      .eq("user_id", uid);
+    likedByMe = (count ?? 0) > 0;
   }
 
-  return NextResponse.json({ survey, questions, isOwner, isAdmin });
+  return NextResponse.json({ survey, questions, isOwner, isAdmin, likeCount: likeCount ?? 0, likedByMe });
 }
