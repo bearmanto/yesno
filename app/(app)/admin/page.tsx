@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { getClient } from "@/utils/supabase/client";
+import { timeAgo } from "@/utils/time";
 
 type Metrics = {
   surveys_public: number;
@@ -69,8 +70,8 @@ export default function AdminPage() {
       {err && <p className="error">{err}</p>}
       {m && (
         <>
-          <section className="card">
-            <h2>Overview</h2>
+          <section className="card" aria-labelledby="overview">
+            <h2 id="overview">Overview</h2>
             <div className="row"><span>Public surveys</span><b>{m.surveys_public}</b></div>
             <div className="row"><span>Private surveys</span><b>{m.surveys_private}</b></div>
             <div className="row"><span>Total survey-level votes</span><b>{m.total_survey_votes}</b></div>
@@ -78,19 +79,20 @@ export default function AdminPage() {
             <div className="row"><span>Users</span><b>{m.users}</b></div>
           </section>
 
-          <section className="card">
-            <h2>Recent surveys</h2>
+          <section className="card" aria-labelledby="recent">
+            <h2 id="recent">Recent surveys</h2>
             <ul className="list">
               {m.recent.map(s => (
                 <li key={s.id} className="row">
                   <div style={{ display: "grid" }}>
                     <b>{s.title}</b>
-                    <span className="muted">{new Date(s.created_at).toLocaleString()}</span>
+                    <span className="muted">{timeAgo(s.created_at)}</span>
                   </div>
                   <div className="row-actions">
                     <span className="muted" style={{ marginRight: 8 }}>{s.is_public ? "Public" : "Private"}</span>
                     <button
                       className="btn secondary"
+                      aria-label={`Set survey "${s.title}" ${s.is_public ? "private" : "public"}`}
                       disabled={busy}
                       onClick={() => setVisibility(s.id, !s.is_public)}
                     >

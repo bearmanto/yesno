@@ -34,17 +34,16 @@ export async function GET(req: NextRequest) {
     .from("survey_questions")
     .select("*")
     .eq("survey_id", id)
+    .is("deleted_at", null)
     .order("created_at", { ascending: true });
 
   if (qErr) return NextResponse.json({ error: qErr.message }, { status: 500 });
 
-  // like count
   const { count: likeCount } = await client
     .from("survey_likes")
     .select("*", { count: "exact", head: true })
     .eq("survey_id", id);
 
-  // who am I
   let isOwner = false;
   let isAdmin = false;
   let likedByMe = false;
@@ -64,5 +63,12 @@ export async function GET(req: NextRequest) {
     likedByMe = (count ?? 0) > 0;
   }
 
-  return NextResponse.json({ survey, questions, isOwner, isAdmin, likeCount: likeCount ?? 0, likedByMe });
+  return NextResponse.json({
+    survey,
+    questions,
+    isOwner,
+    isAdmin,
+    likeCount: likeCount ?? 0,
+    likedByMe,
+  });
 }

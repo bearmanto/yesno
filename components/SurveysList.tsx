@@ -32,7 +32,6 @@ export default function SurveysList() {
           .eq("owner_id", u.id)
           .order("created_at", { ascending: false })
           .limit(10);
-
         if (mounted && resp.data) setMine(resp.data as unknown as Survey[]);
       }
 
@@ -42,48 +41,39 @@ export default function SurveysList() {
         .eq("is_public", true)
         .order("created_at", { ascending: false })
         .limit(10);
-
       if (mounted && respPub.data) setPub(respPub.data as unknown as Survey[]);
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [supabase]);
 
   return (
     <div className="grid2">
-      <section className="card">
-        <h3>
-          My Surveys {email ? <span className="muted">({email})</span> : null}
-        </h3>
+      <section className="card" aria-labelledby="mine">
+        <h3 id="mine">My Surveys {email ? <span className="muted">({email})</span> : null}</h3>
         {mine.length === 0 ? (
-          <p className="muted">None yet.</p>
+          <p className="muted">No surveys yet. <Link className="link" href="/">Create one above ↑</Link></p>
         ) : (
           <ul className="list">
-            {mine.map((s) => (
+            {mine.map(s => (
               <li key={s.id} className="row">
                 <span>{s.title}</span>
-                <Link className="link" href={`/surveys/${s.id}`}>
-                  Open
-                </Link>
+                <Link className="link" href={`/surveys/${s.id}`}>Open</Link>
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      <section className="card">
-        <h3>Public Surveys</h3>
+      <section className="card" aria-labelledby="public">
+        <h3 id="public">Public Surveys</h3>
         {pub.length === 0 ? (
-          <p className="muted">None yet.</p>
+          <p className="muted">No public surveys yet.</p>
         ) : (
           <ul className="list">
-            {pub.map((s) => (
+            {pub.map(s => (
               <li key={s.id} className="row">
                 <span>{s.title}</span>
-                <Link className="link" href={`/surveys/${s.id}`}>
-                  Open
-                </Link>
+                <Link className="link" href={`/surveys/${s.id}`}>Open</Link>
               </li>
             ))}
           </ul>
