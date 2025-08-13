@@ -1,63 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getClient } from "@/utils/supabase/client";
-import Link from "next/link";
-
-type Profile = { id: string; is_admin: boolean; created_at: string };
+import FilterControls from "@/components/dashboard/FilterControls";
+import FilteredList from "@/components/dashboard/FilteredList";
 
 export default function DashboardPage() {
-  const supabase = getClient();
-  const [email, setEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("all");
+  const [sort, setSort] = useState("new");
 
+  // If we ever pass undo params again, strip them:
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (userErr) { setError(userErr.message); return; }
-      const u = userRes.user ?? null;
-      if (!u) { setError("Not signed in"); return; }
-
-      if (!mounted) return;
-      setEmail(u.email ?? null);
-      setUserId(u.id);
-
-      const { data, error: profErr } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", u.id)
-        .maybeSingle();
-
-      if (profErr) { setError(profErr.message); return; }
-      if (data) setProfile(data as Profile);
-    })();
-    return () => { mounted = false; };
-  }, [supabase]);
-
-  async function signOut() {
-    await supabase.auth.signOut();
-    window.location.href = "/";
-  }
+    const url = new URL(location.href);
+    if (url.searchParams.has("undo")) {
+      window.history.replaceState({}, "", "/dashboard");
+    }
+  }, []);
 
   return (
-    <main style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
+    <main className="container">
       <h1>Dashboard</h1>
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
-      {!error && (
-        <div style={{ marginTop: 12 }}>
-          <div><b>User ID:</b> {userId ?? "—"}</div>
-          <div><b>Email:</b> {email ?? "—"}</div>
-          <div><b>is_admin:</b> {String(profile?.is_admin ?? false)}</div>
-          <div><b>profile created_at:</b> {profile?.created_at ?? "—"}</div>
-        </div>
-      )}
-      <div style={{ marginTop: 16, display: "flex", gap: 12 }}>
-        <button onClick={signOut}>Sign out</button>
-        <Link href="/">Home</Link>
-      </div>
+      <FilterControls
+        filter={filter}
+        sort={sort}
+        onChange={(n) => {
+          if (n.filter) setFilter(n.filter);
+          if (n.sort) setSort(n.sort);
+        }}
+      />
+      <FilteredList filter={filter} sort={sort} />
+      <div style={{ height: 64 }} /> {/* Spacer so content isn't hidden behind bottom nav */}
     </main>
   );
 }

@@ -35,3 +35,54 @@ a{ text-decoration:none; color:var(--accent-strong); }
 .grid2{ display:grid; gap:16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .error{ color:#b91c1c; }
 h1,h2,h3{ margin:8px 0; }
+
+/* --- Mobile-first additions for M5 --- */
+
+.touch, .touch-row .btn, .bn-item {
+  min-height: 44px; /* Apple HIG recommended touch size */
+}
+
+.touch-row { align-items: center; }
+
+/* Bottom Nav */
+.bn-root {
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  padding: 8px 10px env(safe-area-inset-bottom);
+  border-top: 1px solid rgba(0,0,0,0.1);
+  background: #fff;
+}
+@media (min-width: 768px) {
+  .bn-root { display: none; } /* Hide on larger screens if you prefer */
+}
+.bn-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  font-size: 12px;
+  padding: 6px 4px;
+  border-radius: 10px;
+}
+.bn-item[aria-current="page"] {
+  background: #dad7cd; /* palette light */
+}
+.bn-icon { font-size: 18px; line-height: 18px; }
+.bn-label { margin-top: 2px; }
+
+/* Stack label (label above select) */
+.stack-label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Ensure selects and buttons are nicely tappable */
+.input.touch, .btn {
+  font-size: 16px; /* avoid iOS zoom on focus */
+}
