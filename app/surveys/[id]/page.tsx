@@ -20,6 +20,7 @@ type Question = {
   id: string;
   survey_id: string;
   body: string;
+  qtype?: "yesno" | "multi" | "rating" | "text"; // NEW tolerated field
   yes_count: number;
   no_count: number;
   created_at: string;
@@ -40,7 +41,6 @@ export default function SurveyPage() {
   const [loading, setLoading] = useState(true);
   const [rename, setRename] = useState("");
 
-  // add-question state
   const [newQ, setNewQ] = useState("");
   const [adding, setAdding] = useState(false);
   const addRef = useRef<HTMLInputElement | null>(null);
@@ -85,7 +85,6 @@ export default function SurveyPage() {
 
   useEffect(() => { setLoading(true); fetchData(); }, [fetchData]);
 
-  // focus add-question when created new
   useEffect(() => {
     if (search.get("new") === "1" && addRef.current) {
       addRef.current.focus();
@@ -228,7 +227,7 @@ export default function SurveyPage() {
       const res = await fetch("/api/surveys/add-question", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ surveyId: survey.id, body }),
+        body: JSON.stringify({ surveyId: survey.id, body, type: "yesno" }), // explicit default
       });
       const json = await res.json();
       if (!res.ok) { push(json.error || "Add question failed", "error"); return; }
@@ -273,8 +272,6 @@ export default function SurveyPage() {
 
   return (
     <main className="container">
-      {/* Top breadcrumb removed for mobile-first — BottomNav handles navigation */}
-
       <header className="card" role="region" aria-label="Survey header">
         <h1>{survey.title}</h1>
         <p className="muted">
@@ -346,7 +343,7 @@ export default function SurveyPage() {
           <div className="row" role="alert" aria-live="polite" style={{ marginTop: 12 }}>
             <span>Question deleted: “{undoQ.title}”</span>
             <div className="row-actions">
-              <button className="btn secondary" onClick={undoDelete}>Undo</button>
+              <button className="btn secondary" onClick={() => void undoDelete()}>Undo</button>
               <span className="muted">
                 {Math.max(0, Math.ceil((undoQ.deadline - Date.now())/1000))}s
               </span>
