@@ -1,40 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getAdmin } from "@/utils/supabase/admin";
 
-type Body = { title: string; is_public?: boolean };
+type CreateBody = {
+  title?: string;
+  isPublic?: boolean;
+};
 
 export async function POST(req: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  if (!supabaseUrl || !anonKey) {
-    return NextResponse.json({ error: "supabase env missing" }, { status: 500 });
+  try {
+    const { title, isPublic }: CreateBody = await req.json();
+    const t = (title ?? "").toString().trim();
+    if (!t) {
+      return NextResponse.json({ error: "Title is required" }, { status: 400 });
+    }
+
+    const auth = req.headers.get("authorization") || "";
+    if (!auth.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Missing auth token" }, { status: 401 });
+    }
+    const token = auth.slice(7);
+
+    const admin = getAdmin();
+
+    // Verify the user from the access token
+    const { data: uinfo, error: uerr } = await admin.auth.getUser(token);
+    if (uerr || !uinfo?.user?.id) {
+      return NextResponse.json({ error: "Invalid user" }, { status: 401 });
+    }
+    const uid = uinfo.user.id;
+
+    // Create survey and return id
+    const { data, error } = await admin
+      .from("surveys")
+      .insert({
+        owner_id: uid,
+        title: t,
+        is_public: !!isPublic,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data?.id) {
+      return NextResponse.json(
+        { error: error?.message || "Failed to create survey" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ id: data.id }, { status: 200 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unexpected error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const authHeader = req.headers.get("authorization");
-  const token = authHeader?.toLowerCase().startsWith("bearer ")
-    ? authHeader.slice(7)
-    : undefined;
-  if (!token) return NextResponse.json({ error: "auth required" }, { status: 401 });
-
-  const client = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-
-  const body = (await req.json()) as Body;
-  const title = (body?.title ?? "").trim();
-  const is_public = body?.is_public ?? true;
-  if (!title) return NextResponse.json({ error: "title required" }, { status: 400 });
-
-  const { data: userRes, error: uErr } = await client.auth.getUser();
-  if (uErr || !userRes?.user?.id) return NextResponse.json({ error: "invalid session" }, { status: 401 });
-  const owner_id = userRes.user.id;
-
-  const { data, error } = await client
-    .from("surveys")
-    .insert([{ owner_id, title, is_public }])
-    .select()
-    .maybeSingle();
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  return NextResponse.json({ survey: data });
 }

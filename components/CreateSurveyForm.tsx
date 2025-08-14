@@ -1,46 +1,82 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { getClient } from "@/utils/supabase/client";
+import { useToast } from "@/components/toast/ToastProvider";
 
 export default function CreateSurveyForm() {
   const supabase = getClient();
+  const router = useRouter();
+  const { push } = useToast();
+
   const [title, setTitle] = useState("");
   const [isPublic, setIsPublic] = useState(true);
-  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onCreate(e: React.FormEvent) {
     e.preventDefault();
-    setMessage(null);
+    const t = title.trim();
+    if (!t) return;
+    setBusy(true);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
-      if (!token) throw new Error("Please sign in first.");
+      if (!token) { push("Please sign in.", "error"); return; }
+
       const res = await fetch("/api/surveys/create", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ title, is_public: isPublic }),
+        body: JSON.stringify({ title: t, isPublic }),
       });
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || "create failed");
-      window.location.href = `/surveys/${payload.survey.id}`;
+      const json = await res.json();
+
+      if (!res.ok) {
+        push(json?.error || "Create failed", "error");
+        return;
+      }
+
+      const id: string | undefined = json?.id || json?.survey?.id;
+      if (!id) {
+        push("Survey created but couldn’t open it. Check Dashboard.", "error");
+        router.push("/dashboard");
+        return;
+      }
+
+      push("Survey created", "success");
+      router.push(`/surveys/${id}?new=1`);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      push(e instanceof Error ? e.message : "Create failed", "error");
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={onSubmit} style={{ display: "grid", gap: 8 }}>
-      <label>
-        <div>Survey Title</div>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} required style={{ padding: 8, width: "100%" }} />
-      </label>
-      <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
-        Public
-      </label>
-      <button type="submit">Create Survey</button>
-      {message && <div style={{ color: "crimson" }}>{message}</div>}
+    <form onSubmit={onCreate} className="card" aria-label="Create survey">
+      <h3>Create Survey</h3>
+      <div className="row-actions" style={{ gap: 8 }}>
+        <input
+          className="input touch"
+          placeholder="Survey title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          inputMode="text"
+          aria-label="Survey title"
+        />
+        <select
+          className="input touch"
+          aria-label="Visibility"
+          value={isPublic ? "public" : "private"}
+          onChange={(e) => setIsPublic(e.target.value === "public")}
+        >
+          <option value="public">Public</option>
+          <option value="private">Private</option>
+        </select>
+        <button className="btn" disabled={!title.trim() || busy} type="submit">
+          {busy ? "Creating…" : "Create"}
+        </button>
+      </div>
     </form>
   );
 }

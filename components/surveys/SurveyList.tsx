@@ -48,21 +48,43 @@ export default function SurveyList({
     const arr = (data as unknown as Survey[]) ?? [];
     if (nextPage === 0) setItems(arr);
     else setItems(prev => [...prev, ...arr]);
-    setHasMore(arr.length === pageSize); // more likely exists if we filled a page
+    setHasMore(arr.length === pageSize);
     setLoading(false);
   }
 
   useEffect(() => {
-    // reset pagination when mode changes
-    setItems([]);
-    setPage(0);
-    setHasMore(true);
+    setItems([]); setPage(0); setHasMore(true);
     if (mode === "mine") void fetchMine();
     else void fetchPublic(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   const heading = useMemo(() => mode === "mine" ? "My Surveys" : "Public Surveys", [mode]);
+
+  // Group by day for public mode
+  function dayKey(iso: string) {
+    const d = new Date(iso);
+    return d.toISOString().slice(0,10); // YYYY-MM-DD
+  }
+  function dayLabel(isoDate: string) {
+    const today = new Date().toISOString().slice(0,10);
+    const y = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+    if (isoDate === today) return "Today";
+    if (isoDate === y) return "Yesterday";
+    const d = new Date(isoDate);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  const grouped = useMemo(() => {
+    if (mode !== "public") return null;
+    const map = new Map<string, Survey[]>();
+    for (const it of items) {
+      const k = dayKey(it.created_at);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(it);
+    }
+    return Array.from(map.entries()).sort((a,b) => b[0].localeCompare(a[0])); // newest day first
+  }, [items, mode]);
 
   return (
     <section className="card" aria-labelledby={`list-${mode}`} style={{ paddingBottom: 12 }}>
@@ -74,20 +96,40 @@ export default function SurveyList({
         <p className="muted">Loading…</p>
       ) : items.length === 0 ? (
         <p className="muted">No surveys {mode === "mine" ? "yet. Create one above ↑" : "to show."}</p>
-      ) : (
+      ) : mode === "mine" ? (
         <ul className="list" style={{ gap: 8 }}>
           {items.map((s) => (
             <SurveyCard
               key={s.id}
               survey={s}
               canManage={mode === "mine"}
-              onChanged={() => {
-                if (mode === "mine") void fetchMine();
-                else void fetchPublic(0);
-              }}
+              onChanged={() => { void fetchMine(); }}
             />
           ))}
         </ul>
+      ) : (
+        <>
+          {grouped!.map(([k, arr]) => (
+            <div key={k} style={{ marginBottom: 8 }}>
+              <div
+                className="muted"
+                style={{ display: "block", margin: "8px 0 4px 0", fontWeight: 600 }}
+              >
+                {dayLabel(k)}
+              </div>
+              <ul className="list" style={{ gap: 8 }}>
+                {arr.map((s) => (
+                  <SurveyCard
+                    key={s.id}
+                    survey={s}
+                    canManage={false}
+                    onChanged={() => { void fetchPublic(0); }}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </>
       )}
 
       {mode === "public" && (

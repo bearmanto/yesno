@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getClient } from "@/utils/supabase/client";
 import { useToast } from "@/components/toast/ToastProvider";
 import { useState } from "react";
+import { timeAgo } from "@/utils/time";
 
 export type Survey = {
   id: string;
@@ -21,14 +22,16 @@ export default function SurveyCard({
   onChanged,
 }: {
   survey: Survey;
-  canManage?: boolean;     // owner/admin
-  onChanged?: () => void;  // tell parent to refetch
+  canManage?: boolean;
+  onChanged?: () => void;
 }) {
   const supabase = getClient();
   const { push } = useToast();
   const [busy, setBusy] = useState(false);
 
   const votes = (survey.yes_count ?? 0) + (survey.no_count ?? 0);
+  const rel = timeAgo(survey.created_at);
+  const abs = new Date(survey.created_at).toLocaleString();
 
   async function rename() {
     const title = prompt("New title:", survey.title)?.trim();
@@ -55,7 +58,6 @@ export default function SurveyCard({
   async function toggleVisibility() {
     setBusy(true);
     try {
-      // Use RLS: owners can update their own row
       const { error } = await supabase
         .from("surveys")
         .update({ is_public: !survey.is_public })
@@ -89,18 +91,26 @@ export default function SurveyCard({
     }
   }
 
+  async function copyLink() {
+    await navigator.clipboard.writeText(`${location.origin}/surveys/${survey.id}`);
+    push("Link copied", "success");
+  }
+
   return (
     <li className="card" style={{ padding: 12, listStyle: "none" }}>
       <div className="row" style={{ alignItems: "flex-start" }}>
-        <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ display: "grid", gap: 2 }}>
           <b style={{ lineHeight: 1.3 }}>{survey.title}</b>
-          <span className="muted">
-            {survey.is_public ? "Public" : "Private"} · {votes} vote{votes === 1 ? "" : "s"}
+          <span className="muted" title={abs}>
+            {survey.is_public ? "Public" : "Private"} · {votes} vote{votes === 1 ? "" : "s"} · {rel}
           </span>
         </div>
-        <Link className="btn secondary" href={`/surveys/${survey.id}`} aria-label={`Open survey ${survey.title}`}>
-          Open
-        </Link>
+        <div className="row-actions" style={{ gap: 6 }}>
+          <button className="btn secondary" onClick={copyLink} aria-label="Copy survey link">Share</button>
+          <Link className="btn secondary" href={`/surveys/${survey.id}`} aria-label={`Open survey ${survey.title}`}>
+            Open
+          </Link>
+        </div>
       </div>
 
       {canManage && (

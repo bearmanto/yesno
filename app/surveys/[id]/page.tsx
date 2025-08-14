@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { getClient } from "@/utils/supabase/client";
 import VisibilityToggle from "@/components/VisibilityToggle";
 import { timeAgo } from "@/utils/time";
@@ -29,6 +28,7 @@ type Question = {
 export default function SurveyPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const search = useSearchParams();
   const supabase = getClient();
   const { push } = useToast();
 
@@ -40,9 +40,10 @@ export default function SurveyPage() {
   const [loading, setLoading] = useState(true);
   const [rename, setRename] = useState("");
 
-  // NEW: add-question state
+  // add-question state
   const [newQ, setNewQ] = useState("");
   const [adding, setAdding] = useState(false);
+  const addRef = useRef<HTMLInputElement | null>(null);
 
   const [undoQ, setUndoQ] = useState<{ id: string; title: string; deadline: number } | null>(null);
   const mounted = useRef(true);
@@ -83,6 +84,14 @@ export default function SurveyPage() {
   }, [id, supabase]);
 
   useEffect(() => { setLoading(true); fetchData(); }, [fetchData]);
+
+  // focus add-question when created new
+  useEffect(() => {
+    if (search.get("new") === "1" && addRef.current) {
+      addRef.current.focus();
+      push("Survey created — add your first question", "info");
+    }
+  }, [search, push]);
 
   async function vote(questionId: string, answer: "yes" | "no") {
     if (!survey?.id) return;
@@ -207,7 +216,6 @@ export default function SurveyPage() {
     }
   }
 
-  // ADD: create a new question
   async function addQuestion() {
     if (!survey?.id) return;
     const body = newQ.trim();
@@ -229,7 +237,7 @@ export default function SurveyPage() {
         setNewQ("");
         push("Question added", "success");
       } else {
-        await fetchData(); // fallback refresh
+        await fetchData();
         setNewQ("");
         push("Question added", "success");
       }
@@ -249,16 +257,11 @@ export default function SurveyPage() {
   if (error === "private_or_missing") {
     return (
       <main className="container" aria-labelledby="private-title">
-        <nav className="nav">
-          <Link href="/" className="link nav-link">Home</Link>
-          <span className="sep">·</span>
-          <Link href="/signin" className="link nav-link">Sign in</Link>
-        </nav>
         <h1 id="private-title">This survey is private</h1>
         <p className="muted" style={{ marginTop: 8, marginBottom: 16 }}>
           You don’t have access. Sign in with the correct account, or contact the owner for access.
         </p>
-        <Link href="/signin" className="btn" aria-label="Go to sign in">Sign in</Link>
+        <a className="btn" href="/signin" aria-label="Go to sign in">Sign in</a>
       </main>
     );
   }
@@ -270,11 +273,7 @@ export default function SurveyPage() {
 
   return (
     <main className="container">
-      <nav className="nav" aria-label="Breadcrumb">
-        <Link href="/" className="link nav-link">Home</Link>
-        <span className="sep">·</span>
-        <Link href="/dashboard" className="link nav-link">Dashboard</Link>
-      </nav>
+      {/* Top breadcrumb removed for mobile-first — BottomNav handles navigation */}
 
       <header className="card" role="region" aria-label="Survey header">
         <h1>{survey.title}</h1>
@@ -282,6 +281,15 @@ export default function SurveyPage() {
           <span title={createdAbs}>Created {createdRel}</span> · Visibility: <b>{survey.is_public ? "Public" : "Private"}</b> ·
           {' '}Questions: <b>{questions.length}</b> · Votes: <b>{totalQuestionVotes}</b>
         </p>
+        <div className="row-actions" style={{ marginTop: 8 }}>
+          <button
+            className="btn secondary"
+            onClick={async () => { await navigator.clipboard.writeText(location.href); push("Link copied", "success"); }}
+            aria-label="Copy link"
+          >
+            Copy link
+          </button>
+        </div>
       </header>
 
       {(isOwner || isAdmin) && (
@@ -314,7 +322,7 @@ export default function SurveyPage() {
                 <path d="M12 7v6" stroke="currentColor" />
                 <circle cx="12" cy="17" r="1" fill="currentColor" />
               </svg>
-              <span className="muted">No questions yet.</span>
+              <span className="muted">No questions yet — add your first one below.</span>
             </span>
           </div>
         ) : (
@@ -352,6 +360,7 @@ export default function SurveyPage() {
           <h3 id="add-question">Add Question</h3>
           <div className="row-actions" style={{ gap: 8 }}>
             <input
+              ref={addRef}
               className="input touch"
               value={newQ}
               onChange={(e) => setNewQ(e.target.value)}
@@ -374,9 +383,10 @@ export default function SurveyPage() {
               {adding ? "Adding…" : "Add"}
             </button>
           </div>
-          <p className="muted" style={{ marginTop: 6 }}>Tip: Keep it short and clear. Examples: “Is dark mode helpful?”, “Ship weekly updates?”</p>
         </section>
       )}
+
+      <div style={{ height: 64 }} />
     </main>
   );
 }
