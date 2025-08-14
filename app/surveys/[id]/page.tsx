@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { getClient } from "@/utils/supabase/client";
 import VisibilityToggle from "@/components/VisibilityToggle";
+import LockAfterParticipationToggle from "@/components/LockAfterParticipationToggle";
 import { timeAgo } from "@/utils/time";
 import { useToast } from "@/components/toast/ToastProvider";
 
@@ -15,12 +16,13 @@ type Survey = {
   yes_count: number;
   no_count: number;
   created_at: string;
+  lock_after_participation?: boolean; // NEW tolerated
 };
 type Question = {
   id: string;
   survey_id: string;
   body: string;
-  qtype?: "yesno" | "multi" | "rating" | "text"; // NEW tolerated field
+  qtype?: "yesno" | "multi" | "rating" | "text";
   yes_count: number;
   no_count: number;
   created_at: string;
@@ -227,7 +229,7 @@ export default function SurveyPage() {
       const res = await fetch("/api/surveys/add-question", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ surveyId: survey.id, body, type: "yesno" }), // explicit default
+        body: JSON.stringify({ surveyId: survey.id, body, type: "yesno" }),
       });
       const json = await res.json();
       if (!res.ok) { push(json.error || "Add question failed", "error"); return; }
@@ -289,7 +291,7 @@ export default function SurveyPage() {
         </div>
       </header>
 
-      {(isOwner || isAdmin) && (
+      {(isOwner || isAdmin) && survey && (
         <section className="card" aria-labelledby="owner-controls">
           <h3 id="owner-controls">Owner Controls</h3>
           <form onSubmit={onRename} className="row-actions" aria-label="Rename survey">
@@ -306,6 +308,11 @@ export default function SurveyPage() {
           </form>
           <div style={{ height: 10 }} />
           <VisibilityToggle surveyId={survey.id} initial={survey.is_public} />
+          <div style={{ height: 10 }} />
+          <LockAfterParticipationToggle
+            surveyId={survey.id}
+            initial={Boolean(survey.lock_after_participation)}
+          />
         </section>
       )}
 
@@ -313,14 +320,7 @@ export default function SurveyPage() {
         <h2 id="questions">Questions</h2>
         {questions.length === 0 ? (
           <div className="row" role="note" aria-live="polite">
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor"/>
-                <path d="M12 7v6" stroke="currentColor" />
-                <circle cx="12" cy="17" r="1" fill="currentColor" />
-              </svg>
-              <span className="muted">No questions yet — add your first one below.</span>
-            </span>
+            <span className="muted">No questions yet — add your first one below.</span>
           </div>
         ) : (
           <ul className="list" role="listbox" aria-label="Questions list">
