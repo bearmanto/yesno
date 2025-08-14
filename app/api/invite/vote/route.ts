@@ -1,65 +1,106 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getAdmin } from "@/utils/supabase/admin";
+import { getUserScopedClient } from "@/utils/supabase/userServer";
 
 type Body = {
-  surveyId: string;
-  questionId?: string | null;
-  answer: "yes" | "no";
+  surveyId?: string;
+  questionId?: string;
+  answer?: string;
+  optionId?: string;   // preferred
+  optId?: string;      // tolerated
+  option_id?: string;  // tolerated
 };
 
 export async function POST(req: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  if (!supabaseUrl || !anonKey) {
-    return NextResponse.json({ error: "supabase env missing" }, { status: 500 });
+  try {
+    const admin = getAdmin();
+
+    // Parse & normalize inputs
+    const raw = (await req.json()) as Body;
+    let surveyId   = (raw.surveyId   ?? "").trim() || undefined;
+    let questionId = (raw.questionId ?? "").trim() || undefined;
+    const optionId = (raw.optionId ?? raw.optId ?? raw.option_id ?? "").trim() || undefined;
+    const answer   = raw.answer?.trim().toLowerCase();
+
+    // Auth (user-scoped)
+    const auth = req.headers.get("authorization") || "";
+    if (!auth.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Missing auth token" }, { status: 401 });
+    }
+    const token = auth.slice(7);
+
+    const { data: uinfo, error: uerr } = await admin.auth.getUser(token);
+    if (uerr || !uinfo?.user?.id) {
+      return NextResponse.json({ error: "Invalid user" }, { status: 401 });
+    }
+    const userClient = getUserScopedClient(token);
+
+    // ── Multiple Choice branch (prefer this if optionId present)
+    if (optionId) {
+      // Derive questionId if missing
+      if (!questionId) {
+        const { data: optRow, error: optErr } = await admin
+          .from("question_options")
+          .select("question_id")
+          .eq("id", optionId)
+          .single();
+        if (optErr || !optRow?.question_id) {
+          return NextResponse.json({ error: "Invalid optionId" }, { status: 400 });
+        }
+        questionId = String(optRow.question_id);
+      }
+
+      // Derive surveyId if missing
+      if (!surveyId) {
+        const { data: qRow, error: qErr } = await admin
+          .from("survey_questions")
+          .select("survey_id")
+          .eq("id", questionId)
+          .single();
+        if (qErr || !qRow?.survey_id) {
+          return NextResponse.json({ error: "Invalid questionId for option" }, { status: 400 });
+        }
+        surveyId = String(qRow.survey_id);
+      }
+
+      const { data, error } = await userClient.rpc("set_multi_choice_vote", {
+        qid: questionId,
+        opt_id: optionId,
+      });
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ ok: true, multi: data }, { status: 200 });
+    }
+
+    // ── Yes/No branch
+    if (questionId && (answer === "yes" || answer === "no")) {
+      // Derive surveyId if missing
+      if (!surveyId) {
+        const { data: qRow, error: qErr } = await admin
+          .from("survey_questions")
+          .select("survey_id")
+          .eq("id", questionId)
+          .single();
+        if (qErr || !qRow?.survey_id) {
+          return NextResponse.json({ error: "Invalid questionId" }, { status: 400 });
+        }
+        surveyId = String(qRow.survey_id);
+      }
+
+      const { data, error } = await userClient.rpc("set_question_vote", {
+        qid: questionId,
+        choice: answer,
+      });
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      const row = Array.isArray(data) && data[0] ? data[0] : null;
+      return NextResponse.json({ ok: true, question: row }, { status: 200 });
+    }
+
+    // Nothing matched
+    return NextResponse.json({ error: "Missing optionId or valid answer" }, { status: 400 });
+  } catch (err: unknown) {
+    // Minimal server-side logging to aid debugging
+    console.error("vote error:", err);
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  const body = (await req.json()) as Body;
-  if (!body?.answer || !["yes", "no"].includes(body.answer)) {
-    return NextResponse.json({ error: "invalid body" }, { status: 400 });
-  }
-
-  const authHeader = req.headers.get("authorization");
-  const token = authHeader?.toLowerCase().startsWith("bearer ")
-    ? authHeader.slice(7)
-    : undefined;
-
-  const client = createClient(supabaseUrl, anonKey, {
-    global: token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
-  });
-
-  // Per-question voting: require auth and use RPC to constrain to 1 vote per user
-  if (body.questionId) {
-    if (!token) return NextResponse.json({ error: "auth required to vote" }, { status: 401 });
-    const { data, error } = await client.rpc("set_question_vote", {
-      qid: body.questionId,
-      choice: body.answer,
-    });
-    if (error) return NextResponse.json({ error: error.message }, { status: 403 });
-
-    // data can be an array (supabase-js) — pick first
-    const row = Array.isArray(data) ? data[0] : data;
-    const question = row
-      ? { id: row.question_id as string, yes_count: row.yes_count as number, no_count: row.no_count as number }
-      : null;
-
-    return NextResponse.json({ ok: true, question });
-  }
-
-  // Legacy whole-survey vote (kept for backward compatibility; not used in UI now)
-  if (!body?.surveyId) return NextResponse.json({ error: "surveyId required" }, { status: 400 });
-  const { error } = await client.rpc("increment_counter", {
-    table_name: "surveys",
-    id_value: body.surveyId,
-    column_name: body.answer === "yes" ? "yes_count" : "no_count",
-  });
-  if (error) return NextResponse.json({ error: error.message }, { status: 403 });
-
-  const { data: survey, error: sErr } = await client
-    .from("surveys")
-    .select("*")
-    .eq("id", body.surveyId)
-    .maybeSingle();
-  if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
-  return NextResponse.json({ ok: true, survey });
 }
