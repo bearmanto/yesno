@@ -94,6 +94,15 @@ export default function ResultsPage() {
     }
   }
 
+  async function copyResultsLink() {
+    try {
+      await navigator.clipboard.writeText(location.href);
+      alert("Results link copied");
+    } catch {
+      alert("Failed to copy link");
+    }
+  }
+
   if (loading) return <main className="container"><p>Loading…</p></main>;
   if (err) return <main className="container"><p className="error">Error: {err}</p></main>;
   if (!survey) return <main className="container"><p>Not found</p></main>;
@@ -111,6 +120,7 @@ export default function ResultsPage() {
         </p>
         <div className="row-actions" style={{ gap: 8 }}>
           <a className="btn secondary" href={`/surveys/${survey.id}`}>Back to survey</a>
+          <button className="btn secondary" onClick={() => void copyResultsLink()}>Copy results link</button>
           {(isOwner || isAdmin) && (
             <button className="btn" onClick={() => void downloadCsv()}>Download CSV</button>
           )}
