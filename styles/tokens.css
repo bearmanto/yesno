@@ -1,0 +1,117 @@
+/* Design Tokens: color, type, spacing, radius, shadow, motion */
+/* Light theme (default). We'll add dark in a later step. */
+
+:root {
+  /* Palette — mapped from provided colors */
+  --green-50:  #dad7cd;   /* light */
+  --green-200: #a3b18a;
+  --green-400: #588157;   /* accent */
+  --green-600: #3a5a40;
+  --green-700: #344e41;   /* text strong */
+
+  /* Semantic colors */
+  --bg:           #f7f8f5;
+  --surface:      #ffffff;
+  --card:         #ffffff;
+  --border:       #C9D7CB;
+  --text:         #1c241e;
+  --text-strong:  var(--green-700);
+  --text-muted:   #5d6c62;
+  --accent:       var(--green-400);
+  --accent-weak:  #e6efe9;
+  --success:      #2e7d32;
+  --error:        #c62828;
+  --info:         #2e6f9a;
+
+  /* Spacing (8pt-ish scale) */
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* Shadows (subtle, award-site style) */
+  --shadow-0: none;
+  --shadow-1: 0 4px 14px rgba(0, 0, 0, 0.05);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.08);
+
+  /* Fluid Type Scale (mobile → desktop) */
+  --font-s: clamp(12px,  2.2vw, 14px);
+  --font-m: clamp(14px,  2.4vw, 16px);
+  --font-l: clamp(16px,  2.8vw, 18px);
+  --font-xl: clamp(20px, 3.4vw, 22px);
+  --font-2xl: clamp(24px, 5.0vw, 28px);
+  --font-3xl: clamp(28px, 6.0vw, 44px);
+
+  /* Motion */
+  --ease-standard: cubic-bezier(.2, .6, .2, 1);
+  --dur-fast: 120ms;
+  --dur-mid:  180ms;
+  --dur-slow: 260ms;
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 3px rgba(88, 129, 87, 0.35);
+}
+
+/* Base document helpers (non-invasive) */
+html, body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Cards (if your globals.css already defines .card, this just enhances) */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+}
+
+/* Buttons (augment existing .btn / .btn.secondary) */
+.btn {
+  border-radius: var(--radius-md);
+  transition: transform var(--dur-fast) var(--ease-standard),
+              box-shadow var(--dur-fast) var(--ease-standard),
+              background-color var(--dur-fast) var(--ease-standard);
+  min-height: 44px;
+}
+.btn:active { transform: scale(0.98); }
+.btn:focus-visible { box-shadow: var(--focus-ring); outline: 0; }
+
+.btn.secondary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* Inputs */
+.input.touch {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.input.touch:focus { box-shadow: var(--focus-ring); outline: 0; }
+
+/* Muted text */
+.muted { color: var(--text-muted); }
+
+/* Utility layout helpers */
+.container { padding: var(--space-4); }
+.row-actions { display: flex; align-items: center; gap: var(--space-3); }
+.touch-row { min-height: 56px; }
+
+/* Media — desktop enhancements */
+@media (min-width: 1024px) {
+  .container { padding: var(--space-6); }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}

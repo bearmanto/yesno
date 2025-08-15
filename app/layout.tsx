@@ -1,4 +1,5 @@
 import "./globals.css";
+import "@/styles/tokens.css";
 import type { Metadata } from "next";
 import ToastProvider from "@/components/toast/ToastProvider";
 import BottomNav from "@/components/navigation/BottomNav";
