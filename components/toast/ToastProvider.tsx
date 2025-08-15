@@ -1,42 +1,91 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 
-export type Toast = { id: string; text: string; type?: "info" | "success" | "error" };
+type ToastKind = "success" | "error" | "info";
+type Toast = { id: string; text: string; kind: ToastKind; ttl: number };
 
-type Ctx = {
-  toasts: Toast[];
-  push: (text: string, type?: Toast["type"]) => void;
-  remove: (id: string) => void;
+type ToastCtx = {
+  push: (text: string, kind?: ToastKind, ttlMs?: number) => void;
 };
 
-const ToastCtx = createContext<Ctx | null>(null);
-
-export function useToast() {
-  const ctx = useContext(ToastCtx);
-  if (!ctx) throw new Error("useToast must be used within <ToastProvider>");
-  return ctx;
-}
+const Ctx = createContext<ToastCtx | null>(null);
 
 export default function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const remove = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  const push = useCallback((text: string, kind: ToastKind = "success", ttlMs = 2500) => {
+    const id = Math.random().toString(36).slice(2);
+    const t: Toast = { id, text, kind, ttl: Date.now() + ttlMs };
+    setToasts((prev) => [...prev, t]);
+    // auto-remove after ttl
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((x) => x.id !== id));
+    }, ttlMs + 50);
   }, []);
 
-  const push = useCallback((text: string, type: Toast["type"] = "info") => {
-    const id = crypto.randomUUID();
-    setToasts((prev) => [...prev, { id, text, type }]);
-    // Auto-remove after 2s
-    setTimeout(() => remove(id), 2000);
-  }, [remove]);
-
-  const value = useMemo(() => ({ toasts, push, remove }), [toasts, push, remove]);
+  const ctx = useMemo(() => ({ push }), [push]);
 
   return (
-    <ToastCtx.Provider value={value}>
+    <Ctx.Provider value={ctx}>
       {children}
-    </ToastCtx.Provider>
+      {/* Top-center viewport, above BottomNav */}
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: "fixed",
+          top: 12,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 9999,
+          display: "grid",
+          gap: 8,
+          width: "min(92vw, 520px)",
+          pointerEvents: "none",
+        }}
+      >
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            role="status"
+            style={{
+              pointerEvents: "auto",
+              borderRadius: 12,
+              padding: "10px 12px",
+              fontSize: 14,
+              lineHeight: 1.3,
+              color: t.kind === "error" ? "#fff" : "#1f2d22",
+              background:
+                t.kind === "error"
+                  ? "#d33"
+                  : t.kind === "info"
+                  ? "#e9f1ea"
+                  : "#dfeee3",
+              border:
+                t.kind === "error"
+                  ? "1px solid #a22"
+                  : "1px solid #c9d7cb",
+              boxShadow: "0 6px 24px rgba(0,0,0,0.08)",
+            }}
+          >
+            {t.text}
+          </div>
+        ))}
+      </div>
+    </Ctx.Provider>
   );
+}
+
+export function useToast() {
+  const ctx = useContext(Ctx);
+  if (!ctx) {
+    // Fail-safe: still show something if provider missing
+    return {
+      push: (text: string) => {
+        if (typeof window !== "undefined") alert(text);
+      },
+    } as ToastCtx;
+  }
+  return ctx;
 }

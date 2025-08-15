@@ -1,12 +1,11 @@
-import type { Metadata } from "next";
 import "./globals.css";
-import BottomNav from "@/components/BottomNav";
+import type { Metadata } from "next";
 import ToastProvider from "@/components/toast/ToastProvider";
-import ToastContainer from "@/components/toast/ToastContainer";
+import BottomNav from "@/components/navigation/BottomNav";
 
 export const metadata: Metadata = {
-  title: "Yes/No Survey",
-  description: "Simple yes/no survey platform",
+  title: "YesNo",
+  description: "Simple, fast, Yes/No surveys.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -15,9 +14,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ToastProvider>
           {children}
-          <BottomNav />
-          <ToastContainer />
         </ToastProvider>
+        <BottomNav />
       </body>
     </html>
   );
