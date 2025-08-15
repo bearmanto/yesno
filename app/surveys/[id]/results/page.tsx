@@ -105,6 +105,36 @@ export default function ResultsPage() {
     }
   }
 
+  function ShareBar() {
+    const url = typeof window !== "undefined" ? window.location.href : "";
+    const text = survey ? `Check out results: ${survey.title}` : "Survey results";
+    const encodedUrl = encodeURIComponent(url);
+    const encodedText = encodeURIComponent(text);
+
+    const wa = `https://wa.me/?text=${encodedText}%20${encodedUrl}`;
+    const tw = `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`;
+    const li = `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`;
+
+    const btn: React.CSSProperties = {
+      minHeight: 44,
+      padding: "10px 14px",
+      borderRadius: 12,
+      border: "1px solid #C9D7CB",
+      background: "#fff",
+      textDecoration: "none",
+      display: "inline-grid",
+      placeItems: "center",
+    };
+
+    return (
+      <div role="group" aria-label="Share results" className="row-actions" style={{ gap: 8, flexWrap: "wrap" }}>
+        <a href={wa} target="_blank" rel="noopener noreferrer" className="btn secondary" style={btn} aria-label="Share on WhatsApp">WhatsApp</a>
+        <a href={tw} target="_blank" rel="noopener noreferrer" className="btn secondary" style={btn} aria-label="Share on X/Twitter">X</a>
+        <a href={li} target="_blank" rel="noopener noreferrer" className="btn secondary" style={btn} aria-label="Share on LinkedIn">LinkedIn</a>
+      </div>
+    );
+  }
+
   if (loading) return <main className="container"><p>Loading…</p></main>;
   if (err) return <main className="container"><p className="error">Error: {err}</p></main>;
   if (!survey) return <main className="container"><p>Not found</p></main>;
@@ -129,6 +159,10 @@ export default function ResultsPage() {
           {(isOwner || isAdmin) && (
             <button className="btn" onClick={() => void downloadCsv()} style={btnStyle}>Download CSV</button>
           )}
+        </div>
+        {/* New: Share bar */}
+        <div style={{ marginTop: 10 }}>
+          <ShareBar />
         </div>
       </header>
 
