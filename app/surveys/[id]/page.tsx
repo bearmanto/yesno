@@ -38,15 +38,18 @@ export default function SurveyPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // New: favorites state
+  // Favorites state
   const [liked, setLiked] = useState(false);
   const [liking, setLiking] = useState(false);
+
+  // Per-question pending vote lock (prevents double-click spam)
+  const [pending, setPending] = useState<Record<string, boolean>>({});
 
   const [newQ, setNewQ] = useState("");
   const [adding, setAdding] = useState(false);
   const addRef = useRef<HTMLInputElement | null>(null);
 
-  // Load survey + questions
+  // Load survey + questions (+ liked state)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -74,7 +77,7 @@ export default function SurveyPage() {
         setIsOwner(Boolean(payload.isOwner));
         setIsAdmin(Boolean(payload.isAdmin));
 
-        // NEW: Load real liked state (requires auth)
+        // Load real liked state (requires auth)
         if (token && payload?.survey?.id) {
           try {
             const r = await fetch(`/api/surveys/is-liked?id=${encodeURIComponent(String(payload.survey.id))}`, {
@@ -83,7 +86,7 @@ export default function SurveyPage() {
             const j = await r.json();
             if (r.ok && typeof j.liked === "boolean") setLiked(j.liked);
           } catch {
-            // ignore liked state errors silently
+            // ignore
           }
         }
       } catch (e) {
@@ -107,26 +110,95 @@ export default function SurveyPage() {
     [questions]
   );
 
+  // --- Vote: trust the server; detect NO-OP (same vote) to adjust toast
   async function vote(questionId: string, answer: "yes" | "no") {
+    if (!survey?.id) return;
+    if (pending[questionId]) return; // lock while in flight
+
+    // Snapshot previous counts for NO-OP detection
+    const prev = questions.find((q) => q.id === questionId);
+    const prevYes = prev?.yes_count ?? 0;
+    const prevNo = prev?.no_count ?? 0;
+
+    setPending((p) => ({ ...p, [questionId]: true }));
     try {
       const { data: sess } = await supabase.auth.getSession();
       const token = sess.session?.access_token;
       if (!token) { push("Please sign in to vote.", "error"); return; }
+
       const res = await fetch("/api/invite/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ surveyId: survey?.id, questionId, answer }),
+        body: JSON.stringify({ surveyId: survey.id, questionId, answer }),
       });
+
+      // If API signals same-vote explicitly (e.g., 409 or a code), show info toast.
+      if (res.status === 409) {
+        push("You already voted the same way.", "info");
+        return;
+      }
+
       const json = await res.json();
-      if (!res.ok) { push(json.error || "Vote failed", "error"); return; }
-      setQuestions(prev => prev.map(q => q.id === questionId
-        ? { ...q,
-            yes_count: answer === "yes" ? (q.yes_count ?? 0) + 1 : q.yes_count,
-            no_count:  answer === "no"  ? (q.no_count  ?? 0) + 1 : q.no_count }
-        : q));
-      push("Vote recorded", "success");
+
+      if (!res.ok) {
+        const maybeCode = (json && (json.code || json.error)) || "";
+        if (String(maybeCode).toUpperCase().includes("ALREADY")) {
+          push("You already voted the same way.", "info");
+        } else {
+          push(json.error || "Vote failed", "error");
+        }
+        return;
+      }
+
+      // Prefer server-provided updated question
+      let newYes = prevYes;
+      let newNo = prevNo;
+      const updated: Question | null =
+        (json.question as Question) ||
+        (json.updatedQuestion as Question) ||
+        null;
+
+      if (updated && updated.id === questionId) {
+        newYes = updated.yes_count ?? 0;
+        newNo = updated.no_count ?? 0;
+        setQuestions((prevList) =>
+          prevList.map((q) => (q.id === questionId ? { ...q, yes_count: newYes, no_count: newNo } : q))
+        );
+      } else if (typeof json.yes_count === "number" && typeof json.no_count === "number") {
+        newYes = json.yes_count;
+        newNo = json.no_count;
+        setQuestions((prevList) =>
+          prevList.map((q) => (q.id === questionId ? { ...q, yes_count: newYes, no_count: newNo } : q))
+        );
+      } else {
+        // Absolute fallback: refetch and compute new counts from server
+        try {
+          const ref = await fetch(`/api/surveys/get?id=${encodeURIComponent(String(survey.id))}`);
+          const payload = await ref.json();
+          if (ref.ok && Array.isArray(payload.questions)) {
+            const fresh = (payload.questions as Question[]).find((q: Question) => q.id === questionId);
+            if (fresh) {
+              newYes = fresh.yes_count ?? 0;
+              newNo = fresh.no_count ?? 0;
+              setQuestions((prevList) => prevList.map((q) => (q.id === questionId ? fresh : q)));
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Decide toast by comparing before/after counts
+      const changed = newYes !== prevYes || newNo !== prevNo;
+      if (changed) {
+        push(json.message || "Vote recorded", "success");
+      } else {
+        push("You already voted the same way.", "info");
+      }
     } catch (e) {
       push(e instanceof Error ? e.message : "Vote failed", "error");
+    } finally {
+      setPending((p) => ({ ...p, [questionId]: false }));
     }
   }
 
@@ -146,7 +218,7 @@ export default function SurveyPage() {
       });
       const json = await res.json();
       if (!res.ok) { push(json.error || "Add question failed", "error"); return; }
-      if (json.question) setQuestions(prev => [...prev, json.question as Question]);
+      if (json.question) setQuestions((prev) => [...prev, json.question as Question]);
       setNewQ("");
       push("Question added", "success");
     } catch (e) {
@@ -173,13 +245,19 @@ export default function SurveyPage() {
       const json = await res.json();
       if (!res.ok) { push(json.error || "Failed to update favorite", "error"); return; }
 
-      setLiked(prev => !prev);
+      setLiked((prev) => !prev);
       push(!liked ? "Added to favorites" : "Removed from favorites", "success");
     } catch (e) {
       push(e instanceof Error ? e.message : "Failed to update favorite", "error");
     } finally {
       setLiking(false);
     }
+  }
+
+  // Back button handler (safe fallback to /dashboard)
+  function goBack() {
+    if (typeof window !== "undefined" && window.history.length > 1) window.history.back();
+    else window.location.href = "/dashboard";
   }
 
   if (loading) return <main className="container"><p>Loading...</p></main>;
@@ -202,6 +280,9 @@ export default function SurveyPage() {
   const createdRel = timeAgo(survey.created_at);
   const createdAbs = new Date(survey.created_at).toLocaleString();
 
+  // Mobile-friendly button sizing
+  const btnStyle: React.CSSProperties = { minHeight: 44, padding: "10px 14px" };
+
   return (
     <main className="container">
       <header className="card" role="region" aria-label="Survey header">
@@ -210,14 +291,16 @@ export default function SurveyPage() {
           <span title={createdAbs}>Created {createdRel}</span> · Visibility: <b>{survey.is_public ? "Public" : "Private"}</b> ·{" "}
           Questions: <b>{questions.length}</b> · Votes: <b>{totalQuestionVotes}</b>
         </p>
-        <div className="row-actions" style={{ marginTop: 8, gap: 8 }}>
-          <a className="btn secondary" href={`/surveys/${survey.id}/results`} aria-label="View results">
+        <div className="row-actions" style={{ marginTop: 8, gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="btn secondary" onClick={goBack} style={btnStyle} aria-label="Go back">Back</button>
+          <a className="btn secondary" href={`/surveys/${survey.id}/results`} style={btnStyle} aria-label="View results">
             View Results
           </a>
           <button
             type="button"
             className="btn secondary"
             onClick={async () => { await navigator.clipboard.writeText(location.href); push("Link copied", "success"); }}
+            style={btnStyle}
             aria-label="Copy link"
           >
             Copy link
@@ -228,6 +311,7 @@ export default function SurveyPage() {
             onClick={() => void toggleLike()}
             disabled={liking}
             aria-pressed={liked}
+            style={btnStyle}
             aria-label={liked ? "Unfavorite survey" : "Favorite survey"}
           >
             {liking ? "…" : liked ? "★ Favorited" : "☆ Favorite"}
@@ -243,17 +327,36 @@ export default function SurveyPage() {
           </div>
         ) : (
           <ul className="list" role="listbox" aria-label="Questions list">
-            {questions.map((q) => (
-              <li key={q.id} className="row touch-row" aria-label={`Question: ${q.body}`}>
-                <div style={{ width: "100%" }}>
-                  <div style={{ marginBottom: 8, fontWeight: 600 }}>{q.body}</div>
-                  <div className="row-actions" role="group" aria-label={`Vote on: ${q.body}`}>
-                    <button type="button" className="btn secondary" onClick={() => void vote(q.id, "yes")}>Yes ({q.yes_count})</button>
-                    <button type="button" className="btn secondary" onClick={() => void vote(q.id, "no")}>No ({q.no_count})</button>
+            {questions.map((q) => {
+              const isPending = Boolean(pending[q.id]);
+              return (
+                <li key={q.id} className="row touch-row" aria-label={`Question: ${q.body}`}>
+                  <div style={{ width: "100%" }}>
+                    <div style={{ marginBottom: 8, fontWeight: 600 }}>{q.body}</div>
+                    <div className="row-actions" role="group" aria-label={`Vote on: ${q.body}`}>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        disabled={isPending}
+                        onClick={() => void vote(q.id, "yes")}
+                        aria-disabled={isPending}
+                      >
+                        Yes ({q.yes_count})
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        disabled={isPending}
+                        onClick={() => void vote(q.id, "no")}
+                        aria-disabled={isPending}
+                      >
+                        No ({q.no_count})
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

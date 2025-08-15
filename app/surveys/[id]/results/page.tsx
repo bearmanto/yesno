@@ -22,6 +22,8 @@ type Question = {
   created_at: string;
 };
 
+const POPULAR_THRESHOLD = 20; // total votes (yes + no) to trigger highlight
+
 export default function ResultsPage() {
   const { id } = useParams<{ id: string }>();
   const supabase = getClient();
@@ -110,6 +112,9 @@ export default function ResultsPage() {
   const createdRel = timeAgo(survey.created_at);
   const createdAbs = new Date(survey.created_at).toLocaleString();
 
+  // Small button/touch tweaks
+  const btnStyle: React.CSSProperties = { minHeight: 44, padding: "10px 14px" };
+
   return (
     <main className="container">
       <header className="card" aria-label="Survey results header">
@@ -118,32 +123,67 @@ export default function ResultsPage() {
           <span title={createdAbs}>Created {createdRel}</span> · Visibility: <b>{survey.is_public ? "Public" : "Private"}</b> ·{" "}
           Questions: <b>{questions.length}</b> · Total votes: <b>{totalVotes}</b>
         </p>
-        <div className="row-actions" style={{ gap: 8 }}>
-          <a className="btn secondary" href={`/surveys/${survey.id}`}>Back to survey</a>
-          <button className="btn secondary" onClick={() => void copyResultsLink()}>Copy results link</button>
+        <div className="row-actions" style={{ gap: 8, flexWrap: "wrap" }}>
+          <a className="btn secondary" href={`/surveys/${survey.id}`} style={btnStyle}>Back to survey</a>
+          <button className="btn secondary" onClick={() => void copyResultsLink()} style={btnStyle}>Copy results link</button>
           {(isOwner || isAdmin) && (
-            <button className="btn" onClick={() => void downloadCsv()}>Download CSV</button>
+            <button className="btn" onClick={() => void downloadCsv()} style={btnStyle}>Download CSV</button>
           )}
         </div>
       </header>
 
       <section className="card" aria-labelledby="results">
-        <h2 id="results">Per-question results</h2>
+        <h2 id="results" style={{ marginBottom: 8 }}>Per-question results</h2>
         {questions.length === 0 ? (
           <p className="muted">No questions yet.</p>
         ) : (
-          <ul className="list" role="list">
+          <ul className="list" role="list" style={{ display: "grid", gap: 12 }}>
             {questions.map((q) => {
               const yes = q.yes_count ?? 0;
               const no = q.no_count ?? 0;
               const sum = yes + no;
               const yesPct = sum ? Math.round((yes / sum) * 100) : 0;
               const noPct = sum ? 100 - yesPct : 0;
+              const popular = sum >= POPULAR_THRESHOLD;
+
               return (
-                <li key={q.id} className="row touch-row" aria-label={`Results for ${q.body}`}>
-                  <div style={{ width: "100%" }}>
-                    <div style={{ fontWeight: 600, marginBottom: 6 }}>{q.body}</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 6 }}>
+                <li key={q.id} className="row touch-row" aria-label={`Results for ${q.body}`} style={{ padding: 0 }}>
+                  <div
+                    style={{
+                      position: "relative",
+                      width: "100%",
+                      borderRadius: 12,
+                      border: popular ? "2px solid #588157" : "1px solid #C9D7CB",
+                      background: popular ? "rgba(88,129,87,0.08)" : "#fff",
+                      padding: 12,
+                      transition: "transform 150ms ease, border-color 150ms ease, background-color 150ms ease",
+                    }}
+                  >
+                    {popular && (
+                      <span
+                        aria-label="Most Voted"
+                        title="Most Voted"
+                        style={{
+                          position: "absolute",
+                          top: 8,
+                          left: 8,
+                          padding: "2px 8px",
+                          fontSize: 12,
+                          borderRadius: 999,
+                          background: "#588157",
+                          color: "#fff",
+                          lineHeight: 1.6
+                        }}
+                      >
+                        ⭐ Most Voted
+                      </span>
+                    )}
+
+                    <div style={{ fontWeight: 600, marginBottom: 10, paddingTop: popular ? 20 : 0 }}>
+                      {q.body}
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
                       <Bar label={`Yes — ${yes} (${yesPct}%)`} percent={yesPct} tone="#588157" />
                       <Bar label={`No — ${no} (${noPct}%)`} percent={noPct} tone="#a3b18a" />
                     </div>
